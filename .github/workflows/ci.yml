@@ -12,5 +12,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Create .env for CI
+        run: cp .env.example .env
+
       - name: Run tests
         run: docker compose run --rm api pytest app/tests/ -v
