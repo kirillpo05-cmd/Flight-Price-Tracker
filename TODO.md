@@ -93,33 +93,28 @@
 
 ---
 
-## §5 poll-worker — ❌ Заглушка
+## §5 poll-worker — ✅ Готово
 
-Файл `workers/tasks.py` — задача `poll_watch` не определена (см. §4, один файл).
-Файл `services/price_service.py` — одна строка комментария, кода нет.
+Файлы: `workers/tasks.py` (задача `poll_watch`), `services/price_service.py`
 
-### Что нужно реализовать
+| Компонент | Статус | Проверено |
+|---|---|---|
+| `poll_watch` — декоратор `bind=True`, `autoretry_for=(ProviderTimeout, ProviderError)`, `retry_backoff` | ✅ | 15/15 тестов |
+| Загрузка watch + проверка `active` / `None` | ✅ | тест skips_inactive, skips_nonexistent |
+| Загрузка user по `user_id` | ✅ | |
+| `SearchParams` из полей watch (`exact` + `range`) | ✅ | |
+| `provider.search(params)` + no-offers path → `write_snapshot(null)` + `mark_checked` | ✅ | |
+| `write_snapshot` → time-series `price_snapshots` | ✅ | тест TestWriteSnapshot |
+| Атомарный `$min lowest_seen` через aggregation pipeline (`$ifNull` — см. ниже) | ✅ | тест sets_lowest_seen_on_first_poll |
+| `lowest_seen_at` — только при новом минимуме (через `returnDocument=BEFORE`) | ✅ | тест does_not_update_lowest_seen_at_when_higher |
+| `cache_last_price` → `HSET lastprice:{watch_id}` + `EXPIRE` | ✅ | тест TestCacheLastPrice |
+| `rules_engine.evaluate(...)` вызывается (stub, §6) | ✅ | |
+| Тесты (15/15) | ✅ | `tests/test_poll_worker.py` |
 
-**`workers/tasks.py` — задача `poll_watch(watch_id: str)`**
-- [ ] Декораторы: `bind=True`, `max_retries=3`, `autoretry_for=(ProviderTimeout, ProviderError)`, `retry_backoff=True`
-- [ ] Загрузить watch (pymongo sync); если `None` или `active=False` → выйти без ошибки
-- [ ] Загрузить user по `watch.user_id`
-- [ ] `get_provider()` → `SearchParams` из полей watch:
-  - `date_mode=exact` → `depart_date = watch.depart_date`
-  - `date_mode=range` → `depart_date = watch.date_from`, `date_to = watch.date_to`
-- [ ] `offers = provider.search(params)`
-- [ ] Если `offers == []` → снэпшот `price=null`, обновить `last_checked_at`, выйти (rules не вызывать)
-- [ ] `best = offers[0]`
-- [ ] Записать документ в `price_snapshots` (time-series коллекция)
-- [ ] Атомарное обновление watches:
-  - `$set`: `last_checked_at`, `last_offer`, `updated_at`
-  - `$min`: `lowest_seen` (atomic min)
-  - `lowest_seen_at`: обновить только если `$min` изменил значение — через `findOneAndUpdate(returnDocument=BEFORE)`
-- [ ] `HSET lastprice:{watch_id} price ... airline ... checked_at ...` + `EXPIRE`
-- [ ] `rules_engine.evaluate(watch, current_price=best.price, old_lowest=watch.lowest_seen)`
-
-**`services/price_service.py`**
-- [ ] Вынести запись снэпшота и обновление `lowest_seen` сюда (опционально, по архитектуре)
+**Найден и исправлен баг (при тестировании):**
+- MongoDB `$min` трактует `null` как значение, меньшее любого числа. При первом поле `$min(null, 87.5)` оставляет `null`, а не пишет 87.5.
+- **Исправление:** plain `$min` заменён на aggregation pipeline update с `$min: [price, $ifNull: [$lowest_seen, price]]`.
+- Теперь при `lowest_seen=null` пишется первое значение; при числовом — берётся минимум.
 
 ---
 
@@ -229,7 +224,7 @@ COOLDOWN = {"threshold": 86400, "new_low": 43200, "drop_pct": 43200, "digest": 7
 | `compose.yml` (api/worker/beat/mongo/redis) | ✅ | |
 | `backend/Dockerfile` | ✅ | |
 | MongoDB индексы + time-series `price_snapshots` | ✅ `core/db.py` | |
-| `celery_app.py` — broker/backend | 🔶 | нет `autodiscover_tasks`, нет `beat_schedule` |
+| `celery_app.py` — broker/backend, `include`, `beat_schedule` | ✅ | |
 | `.github/workflows/ci.yml` | 🔶 | создан, не проверялся после новых файлов |
 | Тесты §4–§7 | ❌ | |
 | `frontend/Dockerfile` | ❌ | |

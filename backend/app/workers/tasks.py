@@ -1,10 +1,13 @@
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import redis as sync_redis
+from bson import ObjectId
+from bson.errors import InvalidId
 
 from app.core.config import settings
 from app.core.db import get_sync_db
+from app.providers.base import ProviderError, ProviderTimeout
 from app.workers.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
@@ -33,19 +36,117 @@ def _to_utc(dt: datetime) -> datetime:
 
 
 # ---------------------------------------------------------------------------
-# poll_watch — stub registered so the worker doesn't crash on §2/§4 queue msgs.
-# Full implementation is in §5 (poll-worker).
+# poll_watch — SPEC §5.5
 # ---------------------------------------------------------------------------
 
 @celery_app.task(
     name="app.workers.tasks.poll_watch",
     bind=True,
     max_retries=3,
+    autoretry_for=(ProviderTimeout, ProviderError),
+    retry_backoff=True,
+    retry_backoff_max=120,
     default_retry_delay=60,
 )
-def poll_watch(self, watch_id: str) -> None:
-    # §5 implementation goes here.
-    logger.warning("poll_watch(%s): not yet implemented — see §5", watch_id)
+def poll_watch(self, watch_id: str) -> None:  # noqa: C901
+    from app.providers import get_provider
+    from app.providers.base import SearchParams
+    from app.services.price_service import (
+        cache_last_price,
+        mark_checked,
+        update_watch_after_poll,
+        write_snapshot,
+    )
+    from app.services.rules_engine import evaluate
+
+    # ── Step 1: load watch ──────────────────────────────────────────────────
+    try:
+        watch_oid = ObjectId(watch_id)
+    except InvalidId:
+        logger.error("poll_watch: invalid ObjectId '%s', dropping task", watch_id)
+        return
+
+    db = get_sync_db()
+    watch = db.watches.find_one({"_id": watch_oid})
+
+    if watch is None:
+        logger.info("poll_watch: watch %s not found (deleted?), skipping", watch_id)
+        return
+    if not watch.get("active", False):
+        logger.info("poll_watch: watch %s is inactive, skipping", watch_id)
+        return
+
+    # ── Step 2: load user ───────────────────────────────────────────────────
+    user = db.users.find_one({"_id": watch["user_id"]})
+    if user is None:
+        logger.warning("poll_watch: user for watch %s not found, skipping", watch_id)
+        return
+
+    plan = user.get("plan", "free")
+
+    # ── Step 3 & 4: provider + SearchParams ────────────────────────────────
+    provider = get_provider()
+    now = datetime.now(timezone.utc)
+
+    if watch["date_mode"] == "exact":
+        raw_depart = watch.get("depart_date")
+        raw_return = watch.get("return_date")
+        depart_date = date.fromisoformat(raw_depart) if raw_depart else None
+        return_date = date.fromisoformat(raw_return) if raw_return else None
+        date_to = None
+    else:  # range
+        raw_from = watch.get("date_from")
+        raw_to = watch.get("date_to")
+        depart_date = date.fromisoformat(raw_from) if raw_from else None
+        return_date = None
+        date_to = date.fromisoformat(raw_to) if raw_to else None
+
+    if depart_date is None:
+        logger.error("poll_watch: watch %s missing departure date, skipping", watch_id)
+        return
+
+    params = SearchParams(
+        origin=watch["origin"],
+        destination=watch["destination"],
+        depart_date=depart_date,
+        return_date=return_date,
+        date_to=date_to,
+        passengers=watch.get("passengers", 1),
+        cabin=watch.get("cabin", "economy"),
+    )
+
+    # ── Step 5: search (autoretry handles ProviderTimeout / ProviderError) ──
+    provider_name = settings.FARE_PROVIDER
+    offers = provider.search(params)
+
+    # ── Step 6: no offers ───────────────────────────────────────────────────
+    if not offers:
+        write_snapshot(db, watch_oid, now, offer=None, provider_name=provider_name)
+        mark_checked(db, watch_oid, now)
+        logger.info("poll_watch: no offers found for watch %s", watch_id)
+        return
+
+    # ── Step 7: best offer ──────────────────────────────────────────────────
+    best = offers[0]
+
+    # ── Step 8: write snapshot ──────────────────────────────────────────────
+    write_snapshot(db, watch_oid, now, offer=best, provider_name=provider_name)
+
+    # ── Step 9: atomic watch update ($min lowest_seen) ──────────────────────
+    old_lowest = update_watch_after_poll(db, watch_oid, best, now)
+
+    # ── Step 10: Redis cache ────────────────────────────────────────────────
+    r = _redis()
+    cache_last_price(r, watch_id, best, now, plan)
+
+    # ── Step 11: rules engine ───────────────────────────────────────────────
+    evaluate(watch, current_price=best.price, old_lowest=old_lowest)
+
+    logger.info(
+        "poll_watch: watch=%s price=%.2f airline=%s old_lowest=%s",
+        watch_id, best.price, best.airline,
+        f"{old_lowest:.2f}" if old_lowest is not None else "None",
+    )
 
 
 # ---------------------------------------------------------------------------
