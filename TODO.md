@@ -1,243 +1,236 @@
-# FareWatch — TODO / Статус реализации
+# FareWatch — TODO / Implementation Status
 
-> Актуально на 2026-06-30. Сверяться с `SPEC.md` перед реализацией каждого пункта.
-> Статус выставлен после ручного чтения каждого файла — не по памяти.
+> Last updated: 2026-06-30. Cross-check with `SPEC.md` before implementing any section.
+> Status set after reading each file directly — not from memory.
 
 ---
 
-## Легенда
+## Legend
 
-| Символ | Смысл |
+| Symbol | Meaning |
 |---|---|
-| ✅ | Реализовано полностью |
-| 🔶 | Есть код, но есть конкретные пробелы — описаны ниже |
-| ❌ | Файл — заглушка (один комментарий, без кода) |
+| OK | Fully implemented and tested |
+| PARTIAL | Code exists but specific gaps documented below |
+| STUB | File is a stub (comment only, no logic) |
 
 ---
 
-## §1 auth — 🔶 Почти готово
+## §1 auth — PARTIAL
 
-Файлы: `api/auth.py`, `models/user.py`, `core/security.py`, `services/authz.py`
+Files: `api/auth.py`, `models/user.py`, `core/security.py`, `services/authz.py`
 
-| Эндпоинт | Статус |
+| Endpoint | Status |
 |---|---|
-| POST `/api/v1/auth/register` | ✅ |
-| POST `/api/v1/auth/login` | ✅ |
-| GET `/api/v1/auth/me` | ✅ |
-| PATCH `/api/v1/auth/me` | 🔶 см. ниже |
-| POST `/api/v1/auth/change-password` | ✅ |
-| DELETE `/api/v1/auth/me` (каскад) | ✅ |
+| POST `/api/v1/auth/register` | OK |
+| POST `/api/v1/auth/login` | OK |
+| GET `/api/v1/auth/me` | OK |
+| PATCH `/api/v1/auth/me` | PARTIAL — see gaps below |
+| POST `/api/v1/auth/change-password` | OK |
+| DELETE `/api/v1/auth/me` (cascade) | OK |
 
-**Пробелы в `PATCH /me`:**
-- `PatchMeRequest` содержит только `telegram_chat_id`. SPEC §1.3 говорит «Обновляет профиль (Telegram, email)» — поле `email` не поддерживается.
-- Условие `if body.telegram_chat_id is not None` не даёт отвязать Telegram (передать `null`). SPEC §1.4 экран настроек подразумевает возможность отключения.
+**Gaps in `PATCH /me`:**
+- `PatchMeRequest` only accepts `telegram_chat_id`. SPEC §1.3 says "update profile (Telegram, email)" — `email` field not supported.
+- Condition `if body.telegram_chat_id is not None` prevents unsetting Telegram (passing `null`). SPEC §1.4 settings screen implies the user can disconnect.
 
 ---
 
-## §2 watches — 🔶 Почти готово
+## §2 watches — OK
 
-Файлы: `api/watches.py`, `models/watch.py`
+Files: `api/watches.py`, `models/watch.py`
 
-| Эндпоинт | Статус |
+| Endpoint | Status |
 |---|---|
-| POST `/api/v1/watches` | ✅ |
-| GET `/api/v1/watches` | ✅ |
-| GET `/api/v1/watches/{id}` | ✅ |
-| PATCH `/api/v1/watches/{id}` | ✅ |
-| DELETE `/api/v1/watches/{id}` | ✅ |
-| POST `/api/v1/watches/{id}/check` | ✅ cooldown Redis 5 мин |
-| GET `/api/v1/watches/{id}/snapshots` | ✅ |
+| POST `/api/v1/watches` | OK — triggers `poll_watch` via Celery |
+| GET `/api/v1/watches` | OK |
+| GET `/api/v1/watches/{id}` | OK |
+| PATCH `/api/v1/watches/{id}` | OK |
+| DELETE `/api/v1/watches/{id}` | OK — cascades snapshots + alerts |
+| POST `/api/v1/watches/{id}/check` | OK — Redis 5-min cooldown, 429 on repeat |
+| GET `/api/v1/watches/{id}/snapshots` | OK |
 
-**Пробел:**
-- `POST /watches` вызывает `celery_app.send_task("app.workers.tasks.poll_watch", ...)` — задача теперь зарегистрирована (§4), но выполняется как заглушка (warning). Полная работа — после §5.
+**Bug fixed during §4 work:**
+- `RuleIn` validator accepted `digest_time` in `"HH:MM"` format (e.g. `"08:30"`) but `send_digests` only matches `"HH:00"`. Fixed regex to `^\d{2}:00$`. Verified: `"08:30"` -> 422, `"08:00"` -> 201.
 
 ---
 
-## §3 provider — ✅ Готово
+## §3 provider — OK
 
-Файлы: `providers/base.py`, `providers/mock.py`, `providers/amadeus.py`, `providers/__init__.py`
+Files: `providers/base.py`, `providers/mock.py`, `providers/amadeus.py`, `providers/__init__.py`
 
-| Компонент | Статус |
+| Component | Status |
 |---|---|
-| `SearchParams`, `Offer` dataclasses | ✅ |
-| Исключения `ProviderTimeout`, `ProviderError`, `NoOffersFound` | ✅ |
-| `FareProvider` (ABC) | ✅ |
-| `MockProvider` — детерм. цена, шум ±15%, range mode | ✅ |
-| `AmadeusProvider` — OAuth2, Redis TTL-кэш, rate-limit, retry 4× | ✅ |
-| `get_provider()` фабрика | ✅ |
-| Тесты (13/13) | ✅ `tests/test_providers.py` |
+| `SearchParams`, `Offer` dataclasses | OK |
+| `ProviderTimeout`, `ProviderError`, `NoOffersFound` | OK |
+| `FareProvider` ABC | OK |
+| `MockProvider` — deterministic price, ±15% noise, range mode | OK |
+| `AmadeusProvider` — OAuth2, Redis TTL cache, rate-limit, 4x retry | OK |
+| `get_provider()` factory | OK |
+| Tests (13/13) | OK — `tests/test_providers.py` |
 
 ---
 
-## §4 scheduler — ✅ Готово
+## §4 scheduler — OK
 
-Файлы: `workers/celery_app.py`, `workers/beat_schedule.py`, `workers/tasks.py`, `core/db.py`
+Files: `workers/celery_app.py`, `workers/beat_schedule.py`, `workers/tasks.py`, `core/db.py`
 
-| Компонент | Статус | Проверено вживую |
+| Component | Status | Verified live |
 |---|---|---|
-| `celery_app.py` — `include=["app.workers.tasks"]`, `beat_schedule` | ✅ | worker показывает все 3 задачи в `[tasks]` |
-| `beat_schedule.py` — `fan_out_polls` + `send_digests` crontab(minute=0) | ✅ | `inspect conf` подтверждает загрузку |
-| `fan_out_polls` — Redis NX-lock, N+1-free user cache, due-расчёт по плану, stagger 30 мин, `scheduler:last_run` | ✅ | 2 watches найдены и dispatched |
-| Идемпотентность lock — второй вызов в течение TTL блокируется | ✅ | "lock held by another instance, skipping" |
-| Stagger — `countdown = i * (1800/n)` секунд | ✅ | второй watch отложен на 900 с (15 мин) |
-| `send_digests` — фильтр `rule.digest_time == "HH:00"`, вызов `evaluate_digest` | ✅ | отработал без ошибок |
-| `core/db.py` — `get_sync_db()` / `get_sync_client()` для pymongo | ✅ | |
-| `poll_watch` — зарегистрирован (заглушка, воркер не падает) | 🔶 | полная реализация в §5 |
-
-**Найден и исправлен баг (во время проверки):**
-- `models/watch.py` — валидатор `RuleIn` принимал `digest_time` в формате `"HH:MM"` (например `"08:30"`), но `send_digests` матчит только `"HH:00"` (scheduler hourly). Пользователь с `"08:30"` никогда не получил бы дайджест.
-- **Исправление:** regex изменён с `^\d{2}:\d{2}$` на `^\d{2}:00$`. Проверено: `"08:30"` → 422, `"08:00"` → 201.
-
-**Замечание по архитектуре:**
-- `send_digests` вызывает `rules_engine.evaluate_digest(watch)`, а не `notifier.send_digest(watch)` напрямую (как написано в §4.5 SPEC). Это соответствует §6.3 ("evaluate_digest вызывается scheduler'ом") и правильно — cooldown проверяется внутри evaluate_digest. Расхождение в SPEC, не в коде.
+| `celery_app.py` — broker, include, beat_schedule | OK | worker shows all 3 tasks in [tasks] |
+| `beat_schedule.py` — fan_out_polls + send_digests crontab(minute=0) | OK | confirmed via inspect conf |
+| `fan_out_polls` — Redis NX-lock, N+1-free user cache, due calc, 30-min stagger | OK | 2 watches dispatched |
+| Idempotency lock — second call within TTL is blocked | OK | "lock held by another instance" |
+| `send_digests` — filters `rule.digest_time == "HH:00"`, calls `evaluate_digest` | OK | ran without error |
+| `core/db.py` — `get_sync_db()` / `get_sync_client()` for Celery (pymongo) | OK | |
 
 ---
 
-## §5 poll-worker — ✅ Готово
+## §5 poll-worker — OK
 
-Файлы: `workers/tasks.py` (задача `poll_watch`), `services/price_service.py`
+Files: `workers/tasks.py` (task `poll_watch`), `services/price_service.py`
 
-| Компонент | Статус | Проверено |
+| Component | Status | Verified |
 |---|---|---|
-| `poll_watch` — декоратор `bind=True`, `autoretry_for=(ProviderTimeout, ProviderError)`, `retry_backoff` | ✅ | 15/15 тестов |
-| Загрузка watch + проверка `active` / `None` | ✅ | тест skips_inactive, skips_nonexistent |
-| Загрузка user по `user_id` | ✅ | |
-| `SearchParams` из полей watch (`exact` + `range`) | ✅ | |
-| `provider.search(params)` + no-offers path → `write_snapshot(null)` + `mark_checked` | ✅ | |
-| `write_snapshot` → time-series `price_snapshots` | ✅ | тест TestWriteSnapshot |
-| Атомарный `$min lowest_seen` через aggregation pipeline (`$ifNull` — см. ниже) | ✅ | тест sets_lowest_seen_on_first_poll |
-| `lowest_seen_at` — только при новом минимуме (через `returnDocument=BEFORE`) | ✅ | тест does_not_update_lowest_seen_at_when_higher |
-| `cache_last_price` → `HSET lastprice:{watch_id}` + `EXPIRE` | ✅ | тест TestCacheLastPrice |
-| `rules_engine.evaluate(...)` вызывается (stub, §6) | ✅ | |
-| Тесты (15/15) | ✅ | `tests/test_poll_worker.py` |
+| `poll_watch` — `bind=True`, `autoretry_for=(ProviderTimeout, ProviderError)`, `retry_backoff` | OK | 15/15 unit tests |
+| Load watch + check `active` / `None` — exit silently | OK | skips_inactive, skips_nonexistent tests |
+| Load user by `user_id` | OK | |
+| Build `SearchParams` from watch fields (`exact` + `range` mode) | OK | |
+| `provider.search(params)` + no-offers path -> `write_snapshot(null)` + `mark_checked` | OK | |
+| `write_snapshot` -> time-series `price_snapshots` | OK | TestWriteSnapshot |
+| Atomic `lowest_seen` via aggregation pipeline + `$ifNull` (null-safe `$min`) | OK | sets_lowest_seen_on_first_poll |
+| `lowest_seen_at` updated only when new minimum (via `returnDocument=BEFORE`) | OK | does_not_update_lowest_seen_at_when_higher |
+| `cache_last_price` -> `HSET lastprice:{watch_id}` + `EXPIRE` with plan-based TTL | OK | TestCacheLastPrice |
+| `rules_engine.evaluate(...)` called (stub until §6) | OK | |
+| Unit tests (15/15) | OK | `tests/test_poll_worker.py` |
+| E2E smoke test — full stack (api + worker + mongo + redis) | OK | `scripts/e2e_poll_worker.py` — all 6 checks pass |
 
-**Найден и исправлен баг (при тестировании):**
-- MongoDB `$min` трактует `null` как значение, меньшее любого числа. При первом поле `$min(null, 87.5)` оставляет `null`, а не пишет 87.5.
-- **Исправление:** plain `$min` заменён на aggregation pipeline update с `$min: [price, $ifNull: [$lowest_seen, price]]`.
-- Теперь при `lowest_seen=null` пишется первое значение; при числовом — берётся минимум.
+**Bug found and fixed:**
+- MongoDB `$min` treats `null` as less than any number — first-ever poll would keep `lowest_seen = null`. Fixed with aggregation pipeline: `$min: [price, $ifNull: [$lowest_seen, price]]`.
 
 ---
 
-## §6 rules-engine — ❌ Заглушка
+## §6 rules-engine — STUB
 
-Файл `services/rules_engine.py` — одна строка комментария, кода нет.
+File: `services/rules_engine.py` — two stub functions, log warnings only.
 
-### Что нужно реализовать
+### What to implement
 
 **`evaluate(watch, current_price, old_lowest) -> bool`**
 - [ ] `threshold`: `fired = current_price <= rule.threshold_price`
 - [ ] `new_low`: `fired = old_lowest is None or current_price < old_lowest`
-- [ ] `drop_pct`: найти предыдущий снэпшот (skip=1, `price != null`); `drop = (prev - cur) / prev * 100`; `fired = drop >= rule.drop_pct`
-- [ ] `digest`: `fired = False`
-- [ ] Проверить Redis cooldown `cooldown:{watch_id}:{rule_type}` — если ключ есть, подавить (return False)
-- [ ] `SET NX` cooldown атомарно
-- [ ] `notifier.send_alert(watch, user, price, rule_type)`
+- [ ] `drop_pct`: fetch previous non-null snapshot (skip=1); `drop = (prev - cur) / prev * 100`; `fired = drop >= rule.drop_pct`
+- [ ] `digest`: always `fired = False`
+- [ ] Check Redis cooldown key `cooldown:{watch_id}:{rule_type}` — if present, suppress (return False)
+- [ ] Set cooldown atomically with `SET NX`
+- [ ] Load user from DB, call `notifier.send_alert(watch, user, price, rule_type)`
+- [ ] Return True if alert was sent
 
 **`evaluate_digest(watch) -> None`**
-- [ ] Собрать данные: `last_offer.price`, `lowest_seen`, `last_checked_at`
-- [ ] Cooldown `cooldown:{watch_id}:digest` (20 ч)
-- [ ] `notifier.send_digest(watch, user)`
+- [ ] Load user from DB
+- [ ] Check cooldown `cooldown:{watch_id}:digest` (20 h)
+- [ ] Call `notifier.send_digest(watch, user)`
 
-**Константы (SPEC §6.5):**
-```python
+**Cooldown constants (SPEC §6.5):**
+```
 COOLDOWN = {"threshold": 86400, "new_low": 43200, "drop_pct": 43200, "digest": 72000}
 ```
 
 ---
 
-## §7 notifier — ❌ Заглушка
+## §7 notifier — STUB
 
-Три файла — заглушки:
-- `services/notifier.py` — одна строка комментария
-- `api/alerts.py` — одна строка комментария
-- `api/integrations.py` — одна строка комментария
+Three files are stubs:
+- `services/notifier.py` — two stub functions
+- `api/alerts.py` — one comment line
+- `api/integrations.py` — one comment line
 
-Дополнительно: **`main.py` не регистрирует `alerts_router` и `integrations_router`** — даже когда роутеры будут написаны, их нужно добавить в `app.include_router(...)`.
+**`main.py` does NOT register `alerts_router` or `integrations_router`** — must add `app.include_router(...)` when those are implemented.
 
-### Что нужно реализовать
+### What to implement
 
 **`services/notifier.py` — `send_alert(watch, user, price, rule_type)`**
 - [ ] `telegram_ok = user.telegram_chat_id is not None`
 - [ ] `email_ok = user.plan in ["pro", "team"]`
-- [ ] Если оба False → запись `alert` со `status="failed"`, `error="no_channel"`, выйти
-- [ ] Создать `alert` документ в `alerts` (`status="pending"`)
-- [ ] Telegram: `POST https://api.telegram.org/bot{TOKEN}/sendMessage` (MarkdownV2, шаблон из SPEC §7.5)
-- [ ] Email: SMTP через `smtplib`; HTML-шаблон Jinja2
-- [ ] Итоговый статус: `"sent"` / `"partial"` / `"failed"`
-- [ ] Обновить `alert.status`, `alert.error`; `watches.last_alerted_at = now`
+- [ ] If both False -> insert alert with `status="failed"`, `error="no_channel"`, return
+- [ ] Insert alert document (`status="pending"`) into `alerts` collection
+- [ ] Telegram: POST `https://api.telegram.org/bot{TOKEN}/sendMessage` (MarkdownV2, template from SPEC §7.5)
+- [ ] Email: SMTP via `smtplib`; Jinja2 HTML template
+- [ ] Final status: `"sent"` / `"partial"` / `"failed"`
+- [ ] Update `alert.status`, `alert.error`; set `watches.last_alerted_at = now`
 
 **`services/notifier.py` — `send_digest(watch, user)`**
-- [ ] Дайджест-шаблон (SPEC §7.5)
-- [ ] Cooldown `cooldown:{watch_id}:digest` 20 ч
+- [ ] Digest template (SPEC §7.5)
 
 **`api/alerts.py`**
-- [ ] `GET /api/v1/alerts` — `watch_id?`, `limit`, `offset`; фильтр по `user_id` из JWT
-- [ ] `GET /api/v1/alerts/{alert_id}` — проверка `user_id`, 403 если чужой
+- [ ] `GET /api/v1/alerts` — optional `?watch_id=`, `limit`, `offset`; filter by `user_id` from JWT
+- [ ] `GET /api/v1/alerts/{alert_id}` — check `user_id`, return 403 if wrong owner
 
 **`api/integrations.py`**
-- [ ] Эндпоинт с инструкцией подключения Telegram (опционально для MVP)
+- [ ] Telegram connect instructions endpoint (optional for MVP)
 
 **`models/`**
-- [ ] Добавить `AlertResponse` Pydantic-модель
+- [ ] Add `AlertResponse` Pydantic model
 
 **`main.py`**
 - [ ] `app.include_router(alerts_router, prefix="/api/v1")`
-- [ ] `app.include_router(integrations_router, prefix="/api/v1")` (если MVP)
+- [ ] `app.include_router(integrations_router, prefix="/api/v1")` (if MVP)
 
 ---
 
-## §8 dashboard (Frontend) — ❌ Не начато
+## §8 dashboard (Frontend) — NOT STARTED
 
-`frontend/.gitkeep` — директория пустая.
+`frontend/` — only `.gitkeep`, nothing else.
 
-### Что нужно реализовать
+### What to implement
 
-**Инициализация**
+**Init**
 - [ ] `npm create vite@latest frontend -- --template react-ts`
-- [ ] Зависимости: `tailwindcss`, `recharts`, `date-fns`, `axios`, `react-router-dom`
-- [ ] Dockerfile для frontend + nginx
+- [ ] Dependencies: `tailwindcss`, `recharts`, `date-fns`, `axios`, `react-router-dom`
+- [ ] Dockerfile for frontend + nginx
 
-**Инфраструктура**
-- [ ] Axios-interceptor: `Authorization: Bearer` из localStorage + 401 → redirect `/login`
+**Infrastructure**
+- [ ] Axios interceptor: `Authorization: Bearer` from localStorage + 401 -> redirect `/login`
 - [ ] `AuthContext` / Zustand: `token`, `plan`, `email`, `telegramConnected`
 - [ ] Protected routes
 
-**Страницы**
-- [ ] `/login` — форма, JWT в localStorage, redirect `/watches`
-- [ ] `/register` — форма, ссылка на `/login`
-- [ ] `/watches` — список карточек (skeleton / empty / plan_limit / populated)
-- [ ] `/watches/new` — пошаговая форма (маршрут → даты → пассажиры → правило)
-- [ ] `/watches/:id` — текущая цена, all-time low, график Recharts, лог алертов
-- [ ] `/settings` — профиль, Telegram, смена пароля, danger zone
+**Pages**
+- [ ] `/login` — form, JWT in localStorage, redirect `/watches`
+- [ ] `/register` — form, link to `/login`
+- [ ] `/watches` — list cards (skeleton / empty / plan_limit / populated)
+- [ ] `/watches/new` — multi-step form (route -> dates -> passengers -> rule)
+- [ ] `/watches/:id` — current price, all-time low, Recharts chart, alert log
+- [ ] `/settings` — profile, Telegram, change password, danger zone
 
-**Компоненты**
-- [ ] Карточка watch: маршрут, цена-badge, last_checked relative time, правило-badge, кнопки ▶/⏸/🔄/🗑
-- [ ] График `LineChart`: X=datetime, Y=price EUR, threshold/lowest линии, разрывы при `null`, tooltip
-- [ ] `formatDistanceToNow` (date-fns, locale ru) для относительного времени
+**Components**
+- [ ] Watch card: route, price badge, last_checked relative time, rule badge, play/pause/refresh/delete buttons
+- [ ] `LineChart`: X=datetime, Y=price EUR, threshold/lowest lines, null gaps, tooltip
+- [ ] Relative timestamps via `date-fns` `formatDistanceToNow`
 
 ---
 
-## Инфраструктура
+## Infrastructure
 
-| Файл/задача | Статус | Примечание |
+| File / Task | Status | Note |
 |---|---|---|
-| `compose.yml` (api/worker/beat/mongo/redis) | ✅ | |
-| `backend/Dockerfile` | ✅ | |
-| MongoDB индексы + time-series `price_snapshots` | ✅ `core/db.py` | |
-| `celery_app.py` — broker/backend, `include`, `beat_schedule` | ✅ | |
-| `.github/workflows/ci.yml` | 🔶 | создан, не проверялся после новых файлов |
-| Тесты §4–§7 | ❌ | |
-| `frontend/Dockerfile` | ❌ | |
-| nginx / reverse-proxy | ❌ вне MVP | |
+| `compose.yml` (api / worker / beat / mongo / redis) | OK | |
+| `backend/Dockerfile` | OK | |
+| MongoDB indexes + time-series `price_snapshots` | OK | `core/db.py` |
+| `celery_app.py` — broker, backend, beat_schedule, include | OK | |
+| `.github/workflows/ci.yml` | OK | Fixed: added `cp .env.example .env` step; was failing with "env file not found" |
+| Unit tests §1-§5 | OK | providers: 13/13, poll-worker: 15/15 |
+| E2E smoke test §5 | OK | `scripts/e2e_poll_worker.py` |
+| Tests §6-§7 | NOT STARTED | |
+| `frontend/Dockerfile` | NOT STARTED | |
+| nginx / reverse-proxy | NOT STARTED — out of MVP scope | |
 
 ---
 
-## Порядок реализации (рекомендуемый)
+## Recommended implementation order
 
 ```
-celery_app.py fix  →  §4+§5  →  §6  →  §7  →  §8
-(autodiscover)       scheduler   rules    notifier   frontend
-                     + worker    engine
+§6 rules-engine  ->  §7 notifier  ->  §8 dashboard
+  evaluate()          send_alert        React + Vite
+  evaluate_digest()   alerts API        Recharts chart
+  cooldown Redis      Telegram/email
 ```
 
-**§4/§5 блокируют всё**: без `poll_watch` нет снэпшотов → нет данных для rules-engine, notifier и графика dashboard.
+**§6 and §7 unblock alerts end-to-end.** §8 (dashboard) can start independently once the API is stable.
