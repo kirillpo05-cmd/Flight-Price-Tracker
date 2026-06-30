@@ -20,8 +20,9 @@ class RuleIn(BaseModel):
             if self.drop_pct is None or not (1.0 <= self.drop_pct <= 99.0):
                 raise ValueError("drop_pct must be between 1 and 99")
         elif self.type == "digest":
-            if not self.digest_time or not re.match(r"^\d{2}:\d{2}$", self.digest_time):
-                raise ValueError("digest_time must be in HH:MM format")
+            # Scheduler fires hourly at :00, so only HH:00 values will ever match.
+            if not self.digest_time or not re.match(r"^\d{2}:00$", self.digest_time):
+                raise ValueError("digest_time must be in HH:00 format (e.g. '08:00')")
         return self
 
 

@@ -1,6 +1,10 @@
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
+from pymongo import MongoClient
+from pymongo.database import Database as SyncDatabase
 
 from app.core.config import settings
+
+# --- Async client (FastAPI / Motor) ---
 
 _client: AsyncIOMotorClient | None = None
 
@@ -14,6 +18,22 @@ def get_client() -> AsyncIOMotorClient:
 
 def get_db() -> AsyncIOMotorDatabase:
     return get_client()[settings.MONGO_DB]
+
+
+# --- Sync client (Celery workers / pymongo) ---
+
+_sync_client: MongoClient | None = None
+
+
+def get_sync_client() -> MongoClient:
+    global _sync_client
+    if _sync_client is None:
+        _sync_client = MongoClient(settings.MONGO_URL)
+    return _sync_client
+
+
+def get_sync_db() -> SyncDatabase:
+    return get_sync_client()[settings.MONGO_DB]
 
 
 async def ensure_indexes() -> None:
