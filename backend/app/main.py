@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
+from app.api.alerts import router as alerts_router
 from app.api.auth import router as auth_router
 from app.api.health import router as health_router
 from app.api.watches import router as watches_router
@@ -31,3 +32,4 @@ async def _http_error(request: Request, exc: HTTPException) -> JSONResponse:
 app.include_router(health_router, prefix="/api/v1")
 app.include_router(auth_router, prefix="/api/v1")
 app.include_router(watches_router, prefix="/api/v1")
+app.include_router(alerts_router, prefix="/api/v1")
