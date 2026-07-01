@@ -108,31 +108,22 @@ Files: `workers/tasks.py` (task `poll_watch`), `services/price_service.py`
 
 ---
 
-## §6 rules-engine — STUB
+## §6 rules-engine — OK
 
-File: `services/rules_engine.py` — two stub functions, log warnings only.
+File: `services/rules_engine.py`
 
-### What to implement
-
-**`evaluate(watch, current_price, old_lowest) -> bool`**
-- [ ] `threshold`: `fired = current_price <= rule.threshold_price`
-- [ ] `new_low`: `fired = old_lowest is None or current_price < old_lowest`
-- [ ] `drop_pct`: fetch previous non-null snapshot (skip=1); `drop = (prev - cur) / prev * 100`; `fired = drop >= rule.drop_pct`
-- [ ] `digest`: always `fired = False`
-- [ ] Check Redis cooldown key `cooldown:{watch_id}:{rule_type}` — if present, suppress (return False)
-- [ ] Set cooldown atomically with `SET NX`
-- [ ] Load user from DB, call `notifier.send_alert(watch, user, price, rule_type)`
-- [ ] Return True if alert was sent
-
-**`evaluate_digest(watch) -> None`**
-- [ ] Load user from DB
-- [ ] Check cooldown `cooldown:{watch_id}:digest` (20 h)
-- [ ] Call `notifier.send_digest(watch, user)`
-
-**Cooldown constants (SPEC §6.5):**
-```
-COOLDOWN = {"threshold": 86400, "new_low": 43200, "drop_pct": 43200, "digest": 72000}
-```
+| Component | Status | Verified |
+|---|---|---|
+| `threshold` — fires when `current_price <= threshold_price` | OK | 5 tests |
+| `new_low` — fires when `old_lowest is None or current_price < old_lowest` | OK | 5 tests |
+| `drop_pct` — skip=1 on snapshots, filters null, computes % drop | OK | 5 tests |
+| `digest` — always returns False (managed by Beat) | OK | 1 test |
+| Redis cooldown SET NX — atomic, suppresses second alert | OK | per-rule tests |
+| Cooldown TTLs: threshold=24h, new_low/drop_pct=12h, digest=20h | OK | TTL tests |
+| `evaluate_digest` — cooldown 20h, calls `send_digest` | OK | 3 tests |
+| `evaluate_digest` skips when user not found | OK | |
+| Total tests (19/19) | OK | `tests/test_rules_engine.py` |
+| Full suite (47/47 — no regressions) | OK | |
 
 ---
 
@@ -216,9 +207,9 @@ Three files are stubs:
 | MongoDB indexes + time-series `price_snapshots` | OK | `core/db.py` |
 | `celery_app.py` — broker, backend, beat_schedule, include | OK | |
 | `.github/workflows/ci.yml` | OK | Fixed: added `cp .env.example .env` step; was failing with "env file not found" |
-| Unit tests §1-§5 | OK | providers: 13/13, poll-worker: 15/15 |
+| Unit tests §3-§6 | OK | providers: 13, poll-worker: 15, rules-engine: 19 — total 47/47 |
 | E2E smoke test §5 | OK | `scripts/e2e_poll_worker.py` |
-| Tests §6-§7 | NOT STARTED | |
+| Tests §7 | NOT STARTED | |
 | `frontend/Dockerfile` | NOT STARTED | |
 | nginx / reverse-proxy | NOT STARTED — out of MVP scope | |
 
