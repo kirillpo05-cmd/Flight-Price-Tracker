@@ -77,6 +77,19 @@ services:
       - ./backend:/app
     command: celery -A app.workers.celery_app:celery_app beat --loglevel=info
 
+  frontend:
+    build:
+      context: ./frontend
+    ports:
+      - "5173:5173"
+    environment:
+      VITE_API_TARGET: http://api:8000
+    depends_on:
+      - api
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+
 volumes:
   mongo_data:
   redis_data:
