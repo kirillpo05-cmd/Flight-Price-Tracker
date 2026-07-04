@@ -1,5 +1,6 @@
-import { useState, FormEvent } from 'react'
+import { useState, useEffect, FormEvent } from 'react'
 import { patchMe, changePassword, deleteMe } from '../api/auth'
+import client from '../api/client'
 import { useAuth } from '../store/AuthContext'
 import { useToast } from '../store/ToastContext'
 
@@ -18,8 +19,20 @@ export function SettingsPage() {
   const { user, refresh, logout } = useAuth()
   const toast = useToast()
 
+  const [botUrl, setBotUrl] = useState<string | null>(null)
+  useEffect(() => {
+    client.get<{ bot_url: string | null }>('/integrations/telegram')
+      .then(r => setBotUrl(r.data.bot_url))
+      .catch(() => {})
+  }, [])
+
   const [chatId, setChatId] = useState(user?.telegram_chat_id?.toString() ?? '')
   const [savingTg, setSavingTg] = useState(false)
+
+  const [emailEdit, setEmailEdit] = useState(false)
+  const [newEmail, setNewEmail] = useState(user?.email ?? '')
+  const [savingEmail, setSavingEmail] = useState(false)
+  const [emailError, setEmailError] = useState('')
 
   const [currentPw, setCurrentPw] = useState('')
   const [newPw, setNewPw] = useState('')
@@ -88,15 +101,71 @@ export function SettingsPage() {
 
       {/* Profile */}
       <Card title="Profile">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between mb-4">
           <div>
             <p className="text-sm font-medium text-gray-900">{user?.email}</p>
             <p className="text-xs text-gray-400 mt-0.5">Member since {user?.created_at?.slice(0, 10)}</p>
           </div>
-          <span className={`text-xs font-bold px-3 py-1 rounded-full uppercase ${PLAN_COLOR[plan]}`}>
-            {PLAN_LABEL[plan]}
-          </span>
+          <div className="flex items-center gap-2">
+            <span className={`text-xs font-bold px-3 py-1 rounded-full uppercase ${PLAN_COLOR[plan]}`}>
+              {PLAN_LABEL[plan]}
+            </span>
+            {!emailEdit && (
+              <button
+                onClick={() => { setEmailEdit(true); setNewEmail(user?.email ?? '') }}
+                className="text-xs text-blue-600 hover:underline"
+              >
+                Change email
+              </button>
+            )}
+          </div>
         </div>
+        {emailEdit && (
+          <form
+            onSubmit={async (e) => {
+              e.preventDefault()
+              setEmailError('')
+              setSavingEmail(true)
+              try {
+                await patchMe({ email: newEmail })
+                await refresh()
+                setEmailEdit(false)
+                toast('Email updated', 'success')
+              } catch (err: any) {
+                const d = err.response?.data
+                setEmailError(d?.detail ?? 'Failed to update email')
+              } finally {
+                setSavingEmail(false)
+              }
+            }}
+            className="flex gap-2 items-start"
+          >
+            <div className="flex-1">
+              {emailError && <p className="text-xs text-red-600 mb-1">{emailError}</p>}
+              <input
+                type="email"
+                value={newEmail}
+                onChange={(e) => setNewEmail(e.target.value)}
+                required
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={savingEmail}
+              className="px-3 py-2 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 disabled:opacity-50"
+            >
+              {savingEmail ? 'Saving…' : 'Save'}
+            </button>
+            <button
+              type="button"
+              onClick={() => setEmailEdit(false)}
+              className="px-3 py-2 border border-gray-200 text-gray-500 text-sm rounded-lg hover:bg-gray-50"
+            >
+              Cancel
+            </button>
+          </form>
+        )}
       </Card>
 
       {/* Telegram */}
@@ -108,13 +177,27 @@ export function SettingsPage() {
           </div>
         ) : (
           <div className="bg-blue-50 border border-blue-100 rounded-lg p-3 mb-4 text-sm text-blue-800">
-            <p className="font-medium mb-1">How to connect Telegram:</p>
-            <ol className="list-decimal list-inside space-y-1 text-xs">
-              <li>Open Telegram and search for your bot</li>
-              <li>Send /start to the bot</li>
-              <li>The bot will reply with your Chat ID</li>
-              <li>Paste it below and save</li>
-            </ol>
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="font-medium mb-1">How to connect Telegram:</p>
+                <ol className="list-decimal list-inside space-y-1 text-xs">
+                  <li>{botUrl ? <>Click <strong>Open bot</strong> on the right</> : <>Open Telegram and search for your bot</>}</li>
+                  <li>Send /start to the bot</li>
+                  <li>The bot will reply with your Chat ID</li>
+                  <li>Paste it below and save</li>
+                </ol>
+              </div>
+              {botUrl && (
+                <a
+                  href={botUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="shrink-0 px-3 py-1.5 bg-blue-600 text-white text-xs font-semibold rounded-lg hover:bg-blue-700 transition-colors"
+                >
+                  Open bot
+                </a>
+              )}
+            </div>
           </div>
         )}
         <form onSubmit={handleSaveTelegram} className="flex gap-2">

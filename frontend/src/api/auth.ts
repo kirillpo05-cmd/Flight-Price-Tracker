@@ -19,6 +19,7 @@ export const getMe = async (): Promise<User> => {
 
 export const patchMe = async (payload: {
   telegram_chat_id?: number | null
+  email?: string
 }): Promise<User> => {
   const { data } = await client.patch<User>('/auth/me', payload)
   return data

@@ -76,9 +76,25 @@ async def patch_me(body: PatchMeRequest, current_user: CurrentUser) -> UserRespo
     now = datetime.now(timezone.utc)
     update: dict = {"updated_at": now}
 
-    if "telegram_chat_id" in body.model_fields_set and body.telegram_chat_id is not None:
-        update["telegram_chat_id"] = body.telegram_chat_id
-        update["telegram_connected_at"] = now
+    if "telegram_chat_id" in body.model_fields_set:
+        if body.telegram_chat_id is not None:
+            update["telegram_chat_id"] = body.telegram_chat_id
+            update["telegram_connected_at"] = now
+        else:
+            update["telegram_chat_id"] = None
+            update["telegram_connected_at"] = None
+
+    if "email" in body.model_fields_set and body.email is not None:
+        if body.email != current_user["email"]:
+            exists = await db.users.find_one(
+                {"email": body.email, "_id": {"$ne": current_user["_id"]}}
+            )
+            if exists:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={"error": "email_taken", "detail": "Email is already registered"},
+                )
+        update["email"] = body.email
 
     if len(update) == 1:
         return _to_response(current_user)

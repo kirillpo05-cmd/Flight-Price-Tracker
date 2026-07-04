@@ -48,6 +48,12 @@ class UserResponse(BaseModel):
 
 class PatchMeRequest(BaseModel):
     telegram_chat_id: int | None = None
+    email: EmailStr | None = None
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def normalize_patch_email(cls, v: object) -> object:
+        return v.strip().lower() if isinstance(v, str) else v
 
 
 class ChangePasswordRequest(BaseModel):

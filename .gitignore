@@ -1,11 +1,28 @@
+# Secrets
 .env
+
+# Python
 __pycache__/
 *.py[cod]
+*.pyo
 .pytest_cache/
 .mypy_cache/
+.ruff_cache/
+
+# Celery
+celerybeat-schedule
+celerybeat-schedule.db
+celerybeat.pid
+
+# Node / Frontend
 node_modules/
 dist/
 .vite/
-celerybeat-schedule
-celerybeat.pid
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
 
