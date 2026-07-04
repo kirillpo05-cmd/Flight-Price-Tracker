@@ -1,6 +1,13 @@
 # Secrets
 .env
 
+# Project planning docs (local only)
+TODO.md
+SPEC.md
+SPEC_TEMPLATE.md
+PROJECT_IDEA.md
+CLAUDE.md
+
 # Python
 __pycache__/
 *.py[cod]
