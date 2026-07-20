@@ -2,6 +2,7 @@ import { useState, FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { createWatch } from '../api/watches'
 import { useToast } from '../store/ToastContext'
+import { AirportAutocomplete } from '../components/AirportAutocomplete'
 import type { Rule } from '../types'
 
 type RuleType = Rule['type']
@@ -94,15 +95,8 @@ export function CreateWatchPage() {
         <Section title="Route">
           <div className="flex items-center gap-2">
             <div className="flex-1">
-              <label className="block text-xs text-gray-500 mb-1">Origin (IATA)</label>
-              <input
-                value={origin}
-                onChange={(e) => setOrigin(e.target.value.toUpperCase())}
-                placeholder="RIX"
-                maxLength={3}
-                required
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm uppercase font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
+              <label className="block text-xs text-gray-500 mb-1">Origin</label>
+              <AirportAutocomplete value={origin} onChange={setOrigin} placeholder="Riga, RIX…" />
             </div>
             <button
               type="button"
@@ -113,15 +107,8 @@ export function CreateWatchPage() {
               ⇄
             </button>
             <div className="flex-1">
-              <label className="block text-xs text-gray-500 mb-1">Destination (IATA)</label>
-              <input
-                value={destination}
-                onChange={(e) => setDestination(e.target.value.toUpperCase())}
-                placeholder="BCN"
-                maxLength={3}
-                required
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm uppercase font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
+              <label className="block text-xs text-gray-500 mb-1">Destination</label>
+              <AirportAutocomplete value={destination} onChange={setDestination} placeholder="Barcelona, BCN…" />
             </div>
           </div>
         </Section>
