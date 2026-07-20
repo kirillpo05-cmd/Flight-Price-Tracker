@@ -8,6 +8,7 @@ import smtplib
 from datetime import datetime, timezone
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from urllib.parse import quote
 
 import httpx
 from bson import ObjectId
@@ -56,6 +57,25 @@ def _rule_description(watch: dict, rule_type: str) -> str:
     return rule_type
 
 
+def _fallback_booking_link(watch: dict) -> str:
+    """Providers (mock and Amadeus self-service) never return a real deep_link —
+    fall back to a Google Flights search for the same route/date/passengers.
+    NB: this only searches live market prices; it will not match the price in
+    the alert when FARE_PROVIDER=mock, since the mock price is synthetic."""
+    origin = watch.get("origin", "")
+    destination = watch.get("destination", "")
+    depart_date = watch.get("depart_date") or watch.get("date_from") or ""
+    passengers = watch.get("passengers", 1)
+    cabin = watch.get("cabin", "economy")
+
+    query = f"Flights to {destination} from {origin} on {depart_date}"
+    if passengers and passengers > 1:
+        query += f" for {passengers} passengers"
+    if cabin and cabin != "economy":
+        query += f" in {cabin} class"
+    return f"https://www.google.com/travel/flights?q={quote(query)}"
+
+
 def _build_telegram_alert(watch: dict, price: float, rule_type: str) -> str:
     origin = watch.get("origin", "")
     destination = watch.get("destination", "")
@@ -66,7 +86,9 @@ def _build_telegram_alert(watch: dict, price: float, rule_type: str) -> str:
     airline_name = _escape_md(offer.get("airline_name") or offer.get("airline") or "—")
     stops = _escape_md(_stops_text(offer.get("stops")))
     duration = _escape_md(_duration_text(offer.get("duration_min")))
-    deep_link = offer.get("deep_link")
+    raw_deep_link = offer.get("deep_link")
+    deep_link = raw_deep_link or _fallback_booking_link(watch)
+    link_label = "Забронировать" if raw_deep_link else "Найти билет"
 
     watch_url = _escape_md(f"{settings.DASHBOARD_URL}/watches/{watch['_id']}")
 
@@ -80,10 +102,7 @@ def _build_telegram_alert(watch: dict, price: float, rule_type: str) -> str:
         "",
     ]
 
-    link_parts = []
-    if deep_link:
-        link_parts.append(f"[Забронировать]({deep_link})")
-    link_parts.append(f"[Открыть в FareWatch]({watch_url})")
+    link_parts = [f"[{link_label}]({deep_link})", f"[Открыть в FareWatch]({watch_url})"]
     lines.append(" \\| ".join(link_parts))
 
     return "\n".join(lines)
@@ -147,7 +166,9 @@ def _build_email_alert(watch: dict, price: float, rule_type: str) -> tuple[str, 
     destination = watch.get("destination", "")
     rule_desc = _rule_description(watch, rule_type)
     offer = watch.get("last_offer") or {}
-    deep_link = offer.get("deep_link", "")
+    raw_deep_link = offer.get("deep_link")
+    deep_link = raw_deep_link or _fallback_booking_link(watch)
+    link_label = "Забронировать" if raw_deep_link else "Найти билет"
     watch_url = f"{settings.DASHBOARD_URL}/watches/{watch['_id']}"
 
     subject = f"FareWatch: {origin}→{destination} €{price:.0f} — {rule_desc}"
@@ -158,7 +179,7 @@ def _build_email_alert(watch: dict, price: float, rule_type: str) -> tuple[str, 
         f"<b>Авиакомпания:</b> {offer.get('airline_name') or offer.get('airline') or '—'}<br>"
         f"<b>Пересадки:</b> {_stops_text(offer.get('stops'))}<br>"
         f"<b>Длительность:</b> {_duration_text(offer.get('duration_min'))}</p>"
-        f"{'<p><a href=\"' + deep_link + '\">Забронировать</a></p>' if deep_link else ''}"
+        f'<p><a href="{deep_link}">{link_label}</a></p>'
         f"<p><a href=\"{watch_url}\">Открыть в FareWatch</a></p>"
     )
     return subject, html

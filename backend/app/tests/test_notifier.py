@@ -109,7 +109,7 @@ class TestTelegramAlertBuilder:
         text = _build_telegram_alert(watch, price=88.0, rule_type="new_low")
         assert "88" in text
 
-    def test_no_booking_link_when_deep_link_none(self):
+    def test_fallback_search_link_when_deep_link_none(self):
         watch = {
             "_id": ObjectId(), "origin": "RIX", "destination": "BCN",
             "depart_date": "2026-09-15",
@@ -119,6 +119,21 @@ class TestTelegramAlertBuilder:
         }
         text = _build_telegram_alert(watch, price=88.0, rule_type="new_low")
         assert "Забронировать" not in text
+        assert "Найти билет" in text
+        assert "google.com/travel/flights" in text
+
+    def test_real_deep_link_uses_book_label(self):
+        watch = {
+            "_id": ObjectId(), "origin": "RIX", "destination": "BCN",
+            "depart_date": "2026-09-15",
+            "rule": {"type": "new_low"},
+            "last_offer": {"airline": "VY", "airline_name": "Vueling",
+                           "stops": 0, "duration_min": 100,
+                           "deep_link": "https://example.com/book"},
+        }
+        text = _build_telegram_alert(watch, price=88.0, rule_type="new_low")
+        assert "Забронировать" in text
+        assert "example.com/book" in text
 
     def test_digest_contains_route(self):
         watch = {
