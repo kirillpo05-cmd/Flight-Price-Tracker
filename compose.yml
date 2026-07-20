@@ -82,6 +82,22 @@ services:
       - ./backend:/app
     command: celery -A app.workers.celery_app:celery_app beat --loglevel=info
 
+  bot:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      MONGO_URL: mongodb://mongo:27017
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+    command: python -m app.workers.telegram_bot
+
   frontend:
     build:
       context: ./frontend
